@@ -6,38 +6,65 @@ const axios = require("axios");
 
 const app = express();
 
-app.use(cors());
 app.use(bodyParser.json());
+app.use(cors());
 
 const commentsByPostId = {};
 
-app.get("/post/:id/comments", (req, res) => {
+app.get("/posts/:id/comments", (req, res) => {
   res.send(commentsByPostId[req.params.id] || []);
 });
 
-app.post("/post/:id/comments", async (req, res) => {
+app.post("/posts/:id/comments", async (req, res) => {
   const commentId = randomBytes(4).toString("hex");
   const { content } = req.body;
 
   const comments = commentsByPostId[req.params.id] || [];
 
-  comments.push({ commentId, content });
+  comments.push({ commentId, content, status: "pending" });
 
   commentsByPostId[req.params.id] = comments;
-  await axios.post("http://localhost:3005/events", {
-    type: "CommentCreated",
-    data: {
-      id: commentId,
-      content,
-      postId: req.params.id,
-    },
-  });
+  await axios
+    .post("http://event-bus-srv:3005/events", {
+      type: "CommentCreated",
+      data: {
+        id: commentId,
+        content,
+        postId: req.params.id,
+        status: "pending",
+      },
+    })
+    .catch((err) => console.log(err.message));
 
   res.status(201).send(comments);
 });
 
-app.post("/events", (req, res) => {
+app.post("/events", async (req, res) => {
   console.log("received events: ", req.body.type);
+  const { type, data } = req.body;
+  if (type === "CommentModerated") {
+    console.log("CommentModerated", data);
+    const { postId, id, status, content } = data;
+    const comments = commentsByPostId[postId];
+    console.log("Comments", comments);
+    const comment = comments.find((comment) => {
+      return comment.commentId === id;
+    });
+    console.log("Comment", comment);
+    comment.status = status;
+
+    await axios
+      .post("http://event-bus-srv:3005/events", {
+        type: "CommentUpdated",
+        data: {
+          id,
+          status,
+          postId,
+          content,
+        },
+      })
+      .catch((err) => console.log(err.message));
+  }
   res.send({});
 });
 
